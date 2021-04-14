@@ -1,0 +1,170 @@
+ # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ # SPDX-License-Identifier: MIT-0
+ #
+ # Permission is hereby granted, free of charge, to any person obtaining a copy of this
+ # software and associated documentation files (the "Software"), to deal in the Software
+ # without restriction, including without limitation the rights to use, copy, modify,
+ # merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+ # permit persons to whom the Software is furnished to do so.
+ #
+ # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+ # INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+ # PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ # HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+ # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ # SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ #
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Creates Glue Jobs, a Glue Database, and an IAM role for the ct-create-config-table example.
+Parameters:
+  S3SourceBucket:
+    Type: String
+    Description: "Name of the Control Tower Logs S3 bucket that contains Config snapshots. If blank, the default name bucket naming convention (aws-controltower-logs-<accountid><region>) will be used."
+    AllowedPattern: "|^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$"
+    Default: ''
+    ConstraintDescription: "Bucket name can include numbers, lowercase letters, uppercase letters, and hyphens (-). It cannot start or end with a hyphen (-)."
+
+Metadata:
+  'AWS::CloudFormation::Interface':
+    ParameterGroups:
+      - Label:
+          default: "Config Snapshot"
+        Parameters:
+          - S3SourceBucket
+    ParameterLabels:
+      S3SourceBucket:
+        default: Cost and Usage Report Source Bucket
+Conditions:
+  SourceBucketSet: !Not [!Equals [!Ref S3SourceBucket, '']]
+Resources:      
+  CTGenerateConfigSnapshotTableScriptBucket:
+    Type: AWS::S3::Bucket
+
+  CTCreateConfigSnapshotTableGlueJobRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - glue.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+        - arn:aws:iam::aws:policy/AWSOrganizationsReadOnlyAccess
+      Policies:
+        - PolicyName: AccessAthena
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:ListMultipartUploadParts
+                  - s3:AbortMultipartUpload
+                  - s3:CreateBucket
+                  - s3:PutObject
+                Resource: 'arn:aws:s3:::aws-athena-query-results-*'
+              - Effect: Allow
+                Action: 
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                Resource: !Sub 'arn:aws:athena:*:${AWS::AccountId}:workgroup/*'
+              - Effect: Allow
+                Action: athena:GetQueryExecutions
+                Resource: '*'
+        - PolicyName: S3ReadOnly
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                - s3:GetObject
+                - s3:ListBucket
+                Resource: 
+                - !Sub 'arn:aws:s3:::${S3SourceBucket}'
+                - !Sub 'arn:aws:s3:::${S3SourceBucket}/*'  
+                - !Sub 'arn:aws:s3:::${CTGenerateConfigSnapshotTableScriptBucket}'
+                - !Sub 'arn:aws:s3:::${CTGenerateConfigSnapshotTableScriptBucket}/*'           
+        - PolicyName: GlueListAllBuckets
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                - s3:ListAllMyBuckets
+                - s3:headBucket
+                Resource: '*'
+  CTConfigGlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: 'aws_config_data'
+        Description: Contains Config snapshot data.
+ 
+  CTConfigGlueJob:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: ct-generate-config-snapshot-table
+      Command:
+        Name: pythonshell
+        PythonVersion: "3"
+        ScriptLocation: !Sub 's3://${CTGenerateConfigSnapshotTableScriptBucket}/ct_generate_config_snapshot_table.py'
+      DefaultArguments:
+        "--s3_source_bucket": !If [SourceBucketSet, !Ref S3SourceBucket, !Sub 'aws-controltower-logs-${AWS::AccountId}-${AWS::Region}' ]
+        "--database_name": !Ref CTConfigGlueDatabase
+        "--table_name": "aws_config_configuration_snapshot"
+        "--extra-py-files": !Sub 's3://${CTGenerateConfigSnapshotTableScriptBucket}/awswrangler-2.5.0-py3-none-any.whl'
+      GlueVersion: "1.0"
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+      MaxCapacity: 1
+      MaxRetries: 0
+      Role: !Ref CTCreateConfigSnapshotTableGlueJobRole
+
+
+  CTConfigGlueJobTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Type: SCHEDULED
+      Description: DESCRIPTION_SCHEDULED
+      Schedule: cron(0 */12 * * ? *)
+      Actions:
+        - JobName: !Ref CTConfigGlueJob
+      Name: ct-generate-config-snapshot-table-scheduled   
+
+  AthenaEC2InstanceSGRelationships:
+    Type: AWS::Athena::NamedQuery
+    Properties: 
+      Database: CTConfigGlueDatabase
+      Description: Example query to that displays Security Groups that are associated with EC2 instances across all AWS accounts from yesterday's config snapshot data.
+      Name: EC2InstanceSecurityGroupRelationships
+      QueryString: !Sub |
+        SELECT account,
+                date,
+                configurationItem.resourceId,
+                configurationItem.resourceType,
+                json_extract_scalar(relationship,
+                '$.resourceid') related_resource, json_extract_scalar(relationship, '$.resourcetype') "related_type"
+        FROM "${CTConfigGlueDatabase}"."aws_config_configuration_snapshot"
+        CROSS JOIN UNNEST(configurationitems) AS t(configurationItem)
+        CROSS JOIN UNNEST(configurationItem.relationships) AS t(relationship)
+        WHERE region = 'us-east-1'
+                AND date = date_format(current_date - interval '1' day, '%Y/%c/%e')
+                AND configurationItem.resourceType = 'AWS::EC2::Instance'
+                AND json_extract_scalar(relationship, '$.resourcetype') = 'AWS::EC2::SecurityGroup'
+        ORDER BY  account, resourceid, related_resource 
+
+Outputs:
+  EnrichedCURBucketUrl: 
+    Description: Use this link to go to the AWS S3 Console and upload your the .py script and .whl file. 
+    Value: !Join ['', ['https://s3.console.aws.amazon.com/s3/buckets/', !Ref CTGenerateConfigSnapshotTableScriptBucket ]]
