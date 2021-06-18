@@ -19,7 +19,7 @@
 import argparse
 import logging
 import sys
-
+import datetime
 import awswrangler as wr
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -61,6 +61,8 @@ TABLE_NAME = args["table_name"]
 org_ids = set()
 accounts = set()
 regions = set()
+begin_date = datetime.date.today()
+
 
 log.info("Enumerating orgs, accounts, and regions from bucket prefixes")
 for org in wr.s3.list_directories(path="s3://"+S3_SOURCE_BUCKET+"/"):
@@ -69,6 +71,13 @@ for org in wr.s3.list_directories(path="s3://"+S3_SOURCE_BUCKET+"/"):
         accounts.add(account.rsplit("/",2)[1])
         for region in wr.s3.list_directories(path=account+'Config/'):
             regions.add(region.rsplit("/",2)[1])
+            firstyear = min([int(year.rsplit("/", 2)[1]) for year in wr.s3.list_directories(path=region)])
+            firstmonth = min([int(month.rsplit("/", 2)[1]) for month in wr.s3.list_directories(path=region+str(firstyear)+'/')])
+            firstday = min([int(day.rsplit("/", 2)[1]) for day in wr.s3.list_directories(path=region+str(firstyear)+'/'+str(firstmonth)+'/')])
+            first_date = datetime.date(firstyear, firstmonth, firstday)
+            if first_date < begin_date:
+                begin_date = first_date
+print(begin_date)        
 
 wr.catalog.delete_table_if_exists(
   database=DATABASE_NAME,
@@ -128,7 +137,7 @@ wr.athena.read_sql_query(
     "projection.date.format" = "yyyy/M/d",
     "projection.date.interval" = "1",
     "projection.date.interval.unit" = "DAYS",
-    "projection.date.range" = "2018/01/01, NOW",
+    "projection.date.range" = "begindate;,NOW",
     "projection.date.type" = "date", 
     "storage.location.template" = "s3://:bucket_name;/${org}/AWSLogs/${account}/Config/${region}/${date}/ConfigSnapshot"
   )
@@ -139,7 +148,8 @@ wr.athena.read_sql_query(
     "bucket_name": S3_SOURCE_BUCKET,
     "orgs": ",".join(org_ids),
     "accounts": ",".join(accounts),
-    "regions": ",".join(regions)
+    "regions": ",".join(regions),
+    "begindate": '{d.year}/{d.month}/{d.day}'.format(begin_date)
   }
 )
 

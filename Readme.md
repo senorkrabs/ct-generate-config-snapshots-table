@@ -1,10 +1,10 @@
-# Config Snapshot Glue Table Generator for Control Tower
+# Query Config Snapshots with Athena
 
-This package creates a Glue Python Shell Job that will automatically generate a Glue table that can be used to query AWS Config Snapshot data stored a bucket in the Control Tower LogArchive account. This is useful for performing advanced queries of Config data using Amazon Athena.
+This package creates a Glue Python Shell Job that will automatically generate a Glue table that can be used to query AWS Config Snapshot data stored in an S3 Bucket. This is useful for performing advanced queries of Config data using Amazon Athena.
 
 This script uses the [AWS Data Wrangler](https://github.com/awslabs/aws-data-wrangler) package execute the Athena SQL statement that creates the table.
 ## Contents
-- [Config Snapshot Glue Table Generator for Control Tower](#config-snapshot-glue-table-generator-for-control-tower)
+- [Query Config Snapshots with Athena](#query-config-snapshots-with-athena)
   - [Contents](#contents)
   - [Functionality](#functionality)
     - [Table Definition](#table-definition)
@@ -16,8 +16,8 @@ This script uses the [AWS Data Wrangler](https://github.com/awslabs/aws-data-wra
 ## Functionality
 ![Diagram](architecture.png)
 - The script runs a Glue Python Shell Job and generates a table in Glue that contains Config snapshot data.
-- In Control Tower, Config snapshot objects follow this prefix naming convention: `s3://aws-controltower-logs-[accountId]-[region]/[org-id]/AWSLogs/[accountId]/Config/[region]/YYYY/m/d`. Rather than renaming the snapshot files to match Hive naming and manually generating partitions, the table is created with [partition projections](https://docs.aws.amazon.com/athena/latest/ug/partition-projection.html). This enables the config data to be queried in-place.
-- The script identifies the organization id, accounts and regions that  creates `enum` partition projections in the table properties for them.
+- Config snapshot objects follow this prefix naming convention: `s3://[bucketname]/[optional-prefix]/AWSLogs/[accountId]/Config/[region]/YYYY/m/d/ConfigSnapshot/[snapshotName].json.gz`. A table is registered in the Glue data catalog with the Config Snapshot schema, and uses [partition projections](https://docs.aws.amazon.com/athena/latest/ug/partition-projection.html) to handle partitioning of the data. This enables the config data to be queried in-place.
+- The Python script identifies the organization id, accounts and regions, then creates `enum` partition projections in the table properties for these values.
 - A Glue Trigger, when activated, will execute the Glue Python Shell Job once every 12 hours to recreate the table - this is needed in to update the `enum` partition projects (i.e. if new accounts or regions begin sending data to the bucket)
 
 ### Table Definition
@@ -68,7 +68,7 @@ Below is the SQL statement that is used to generate the table. The `enum` value 
     "projection.date.format" = "yyyy/M/d",
     "projection.date.interval" = "1",
     "projection.date.interval.unit" = "DAYS",
-    "projection.date.range" = "2018/01/01, NOW",
+    "projection.date.range" = ":begindate;,NOW",
     "projection.date.type" = "date", 
     "storage.location.template" = "s3://:bucket_name;/${org}/AWSLogs/${account}/Config/${region}/${date}/ConfigSnapshot"
   )
