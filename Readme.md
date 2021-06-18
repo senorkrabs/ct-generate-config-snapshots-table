@@ -101,9 +101,9 @@ An Athena saved query is created. The query is named `EC2InstanceSecurityGroupRe
 
 ## Setup
 
-**IMPORTANT**: This template is intended to be run in a Control Tower LogArchive account. It should also be run in the HOME region of Control Tower (i.e. the region where Control Tower log buckets are located).
+**IMPORTANT**: This template is intended to be run in the account where the S3 bucket containing your Config snapshots is located. It should also be run in region where the bucket is located. Note: This script has been tested in a Control Tower environment, deployed in the "LogArchive" account. The script assumes the logs follow this s3 prefix structure: `s3://:bucket_name;/${org}/AWSLogs/${account}/Config/${region}/${date}/ConfigSnapshot`
 
-1. Log into the Control Tower LogArchive account and going to the home region. 
+1. Log into the account where Config snapshot data is located and going to the bucket's region. 
 2. Deploy the CloudFormation template, setup-generate_config_snapshot_table.yml. Optionally, specify the source bucket name. If you do not specify a name, the standard Control Tower logs bucket name `aws-controltower-logs-[accountid]-[region]`is used.
 
 3. After the CloudFormation stack is created, go to outputs and click the link to the S3 bucket that the stack created.

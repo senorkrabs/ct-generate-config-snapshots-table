@@ -149,7 +149,7 @@ wr.athena.read_sql_query(
     "orgs": ",".join(org_ids),
     "accounts": ",".join(accounts),
     "regions": ",".join(regions),
-    "begindate": '{d.year}/{d.month}/{d.day}'.format(begin_date)
+    "begindate": f'{begin_date.year}/{begin_date.month}/{begin_date.day}'
   }
 )
 
