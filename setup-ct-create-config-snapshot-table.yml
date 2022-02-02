@@ -28,12 +28,12 @@ Metadata:
   'AWS::CloudFormation::Interface':
     ParameterGroups:
       - Label:
-          default: "Config Snapshot"
+          default: "Config Snapshots"
         Parameters:
           - S3SourceBucket
     ParameterLabels:
       S3SourceBucket:
-        default: Cost and Usage Report Source Bucket
+        default: Config Snapshots source bucket
 Conditions:
   SourceBucketSet: !Not [!Equals [!Ref S3SourceBucket, '']]
 Resources:      
@@ -165,6 +165,6 @@ Resources:
         ORDER BY  account, resourceid, related_resource 
 
 Outputs:
-  EnrichedCURBucketUrl: 
+  CTGenerateConfigSnapshotTableScriptBucket: 
     Description: Use this link to go to the AWS S3 Console and upload your the .py script and .whl file. 
     Value: !Join ['', ['https://s3.console.aws.amazon.com/s3/buckets/', !Ref CTGenerateConfigSnapshotTableScriptBucket ]]

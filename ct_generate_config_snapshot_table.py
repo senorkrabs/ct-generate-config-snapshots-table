@@ -66,17 +66,26 @@ begin_date = datetime.date.today()
 
 log.info("Enumerating orgs, accounts, and regions from bucket prefixes")
 for org in wr.s3.list_directories(path="s3://"+S3_SOURCE_BUCKET+"/"):
-    org_ids.add(org.rsplit("/",2)[1])
-    for account in wr.s3.list_directories(path=org+'AWSLogs/'):
-        accounts.add(account.rsplit("/",2)[1])
-        for region in wr.s3.list_directories(path=account+'Config/'):
-            regions.add(region.rsplit("/",2)[1])
-            firstyear = min([int(year.rsplit("/", 2)[1]) for year in wr.s3.list_directories(path=region)])
-            firstmonth = min([int(month.rsplit("/", 2)[1]) for month in wr.s3.list_directories(path=region+str(firstyear)+'/')])
-            firstday = min([int(day.rsplit("/", 2)[1]) for day in wr.s3.list_directories(path=region+str(firstyear)+'/'+str(firstmonth)+'/')])
-            first_date = datetime.date(firstyear, firstmonth, firstday)
-            if first_date < begin_date:
-                begin_date = first_date
+  org_ids.add(org.rsplit("/",2)[1])
+  for account in wr.s3.list_directories(path=org+'AWSLogs/'):
+      accounts.add(account.rsplit("/",2)[1])
+      for region in wr.s3.list_directories(path=account+'Config/'):
+        regions.add(region.rsplit("/",2)[1])
+        years = [(year.rsplit("/", 2)[1]) for year in wr.s3.list_directories(path=region)]
+        years.sort(key=int)
+        firstyear = years[0]
+        if int(firstyear) > begin_date.year or (int(firstyear) == begin_date.year and begin_date.month == 1): next 
+        months = [month.rsplit("/", 2)[1] for month in wr.s3.list_directories(path=region+str(firstyear)+'/')]
+        months.sort(key=int)
+        firstmonth = months[0]
+        if (int(firstmonth) > begin_date.month) or (int(firstmonth) == begin_date.month and begin_date.day == 1): next 
+
+        days = [(day.rsplit("/", 2)[1]) for day in wr.s3.list_directories(path=region+str(firstyear)+'/'+str(firstmonth)+'/')]
+        days.sort(key=int)
+        firstday = days[0]
+        first_date = datetime.date(int(firstyear), int(firstmonth), int(firstday))
+        if first_date < begin_date:
+            begin_date = first_date
 print(begin_date)        
 
 wr.catalog.delete_table_if_exists(
@@ -137,7 +146,7 @@ wr.athena.read_sql_query(
     "projection.date.format" = "yyyy/M/d",
     "projection.date.interval" = "1",
     "projection.date.interval.unit" = "DAYS",
-    "projection.date.range" = "begindate;,NOW",
+    "projection.date.range" = ":begindate;,NOW",
     "projection.date.type" = "date", 
     "storage.location.template" = "s3://:bucket_name;/${org}/AWSLogs/${account}/Config/${region}/${date}/ConfigSnapshot"
   )
